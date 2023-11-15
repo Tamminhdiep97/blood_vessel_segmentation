@@ -19,7 +19,7 @@ utils.seed_everything(conf.seed)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def main():
-    model = utils.build_model(conf.backbone_name, conf.class_output, device)
+    model = utils.build_model(conf.backbone_name, conf.num_classes, device)
     model.eval()
     
     list_image = glob(opj(conf.test_path, '*', 'images', '*.tif'))
