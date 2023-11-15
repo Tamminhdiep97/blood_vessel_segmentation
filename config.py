@@ -10,6 +10,9 @@ class_output = 2
 data_folder = 'data'
 train_folder = 'train'
 test_folder = 'test'
+valid_bs = 2
+img_size  = [512, 512]
 
-train_path = opj(os.getcwd(), data_folder, train_folder)
-test_path = opj(os.getcwd(), data_folder, test_folder)
+data_path = opj(os.getcwd(), data_folder)
+train_path = opj(data_path, train_folder)
+test_path = opj(data_path, test_folder)
