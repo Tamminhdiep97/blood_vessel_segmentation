@@ -35,6 +35,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 DiceLoss = smp.losses.DiceLoss(mode='binary')
 BCELoss = smp.losses.SoftBCEWithLogitsLoss()
+FocalLoss = smp.losses.FocalLoss(mode='binary', alpha=0.01)
+LovaszLoss = smp.losses.LovaszLoss(mode='binary')
 
 
 def criterion(y_pred, y_true):
@@ -43,6 +45,12 @@ def criterion(y_pred, y_true):
     elif conf.loss_func == "BCELoss":
         y_true = y_true.unsqueeze(1)
         return BCELoss(y_pred, y_true)
+    elif conf.loss_func == 'MultiLoss':
+        return ((FocalLoss(y_pred, y_true)+BCELoss(y_pred, y_true.unsqueeze(1))) + DiceLoss(y_pred, y_true))
+    elif conf.loss_func == 'MultiLoss_2':
+        return BCELoss(y_pred, y_true.unsqueeze(1)) + LovaszLoss(y_pred, y_true)
+    elif conf.loss_func == 'MultiLoss_3':
+        return BCELoss(y_pred, y_true.unsqueeze(1)) + LovaszLoss(y_pred, y_true) + FocalLoss(y_pred, y_true) 
 
 
 def fetch_scheduler(optimizer):
@@ -96,7 +104,10 @@ def train_one_epoch(model, optimizer, scheduler, dataloader, device, epoch):
             optimizer.zero_grad()
 
             if scheduler is not None:
-                scheduler.step()
+                if scheduler != 'CosineAnnealingWarmRestarts':
+                    scheduler.step()
+                else:
+                    scheduler.step((epoch-1) + step / len(dataloader))
                 
         running_loss += (loss.item() * batch_size)
         dataset_size += batch_size
@@ -156,7 +167,7 @@ def valid_one_epoch(model, optimizer, dataloader, device, epoch):
 
 def run_training(model, optimizer, scheduler, device, num_epochs, train_loader, valid_loader):
     if torch.cuda.is_available():
-        print("cuda: {}\n".format(torch.cuda.get_device_name()))
+        logger.info("cuda: {}".format(torch.cuda.get_device_name()))
     
     start = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
@@ -243,7 +254,7 @@ def main():
             transforms=data_transforms['valid']
         )
     train_loader = DataLoader(
-            train_dataset, batch_size=conf.valid_bs, num_workers=4, shuffle=False, pin_memory=True, drop_last=False
+            train_dataset, batch_size=conf.train_bs, num_workers=4, shuffle=False, pin_memory=True, drop_last=False
         )
     valid_loader = DataLoader(
             valid_dataset, batch_size=conf.valid_bs, num_workers=0, shuffle=False, pin_memory=True

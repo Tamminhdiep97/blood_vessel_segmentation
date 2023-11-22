@@ -45,6 +45,37 @@ def get_dataTransforms(img_size):
                     *img_size, interpolation=cv2.INTER_NEAREST
                 ),
                 A.HorizontalFlip(p=0.5),
+                A.ShiftScaleRotate(scale_limit=0.5, rotate_limit=0, shift_limit=0.1, p=1, border_mode=0),
+
+                # A.PadIfNeeded(min_height=320, min_width=320, always_apply=True, border_mode=0),
+                # A.RandomCrop(height=320, width=320, always_apply=True),
+                # A.IAAAdditiveGaussianNoise(p=0.2),
+                A.IAAPerspective(p=0.5),
+
+                A.OneOf(
+                    [
+                        A.RandomBrightness(p=1),
+                        A.RandomGamma(p=1),
+                    ],
+                    p=0.9,
+                ),
+
+                A.OneOf(
+                    [
+                        A.IAASharpen(p=1),
+                        A.Blur(blur_limit=3, p=1),
+                        A.MotionBlur(blur_limit=3, p=1),
+                    ],
+                    p=0.9,
+                ),
+
+                A.OneOf(
+                    [
+                        A.RandomContrast(p=1),
+                        A.HueSaturationValue(p=1),
+                    ],
+                    p=0.9,
+                ),
             ],
             p=1.0
         ),
@@ -79,17 +110,29 @@ def iou_coef(y_true, y_pred, thr=0.5, dim=(2,3), epsilon=0.001):
 
 
 def build_model(backbone, num_classes, device):
+    # model = smp.Unet(
+    #     # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+    #     encoder_name=backbone,
+    #     # use `imagenet` pre-trained weights for encoder initialization
+    #     encoder_weights='imagenet',
+    #     # model input channels (1 for gray-scale images, 3 for RGB, etc.)
+    #     in_channels=3,
+    #     # model output channels (number of classes in your dataset)
+    #     classes=num_classes,
+    #     activation=None,
+    # )
     model = smp.Unet(
         # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
         encoder_name=backbone,
         # use `imagenet` pre-trained weights for encoder initialization
-        encoder_weights=None,
+        encoder_weights='imagenet',
         # model input channels (1 for gray-scale images, 3 for RGB, etc.)
         in_channels=3,
         # model output channels (number of classes in your dataset)
         classes=num_classes,
         activation=None,
     )
+
     model.to(device)
     return model
 
@@ -112,7 +155,7 @@ def rle_encode(img):
     runs[1::2] -= runs[::2]
     rle = ' '.join(str(x) for x in runs)
     if rle=='':
-        rle = '1 1'
+        rle = '1 0'
     return rle
 
 
