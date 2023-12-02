@@ -1,0 +1,8 @@
+Best Loss: 1.0189365969446604
+Best Epoch: 22
+Best Val Dice: 0.256241112947464
+Best Val Jaccard: 0.18054623901844025
+
+==========
+
+Best epoch loss: 0.13202 

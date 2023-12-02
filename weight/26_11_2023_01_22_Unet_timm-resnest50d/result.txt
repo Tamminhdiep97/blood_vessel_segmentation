@@ -1,0 +1,6 @@
+Best Loss: 1.0181229682422366
+Best Epoch: 20
+Best Val Dice: 0.27012574672698975
+Best Val Jaccard: 0.1976141482591629
+
+Best epoch train loss: 0.14825
