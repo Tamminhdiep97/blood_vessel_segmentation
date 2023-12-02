@@ -1,0 +1,7 @@
+Best Loss: 1.014
+Best Val Dice: 0.7
+Best Val Jaccard: 0.7
+
+==========
+
+Best epoch loss: 0.04
