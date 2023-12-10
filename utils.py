@@ -57,20 +57,21 @@ def get_dataTransforms(img_size):
                 A.Resize(
                     *img_size, interpolation=cv2.INTER_NEAREST
                 ),
-                A.HorizontalFlip(p=0.5),
-                A.ShiftScaleRotate(scale_limit=0.5, rotate_limit=0.2, shift_limit=0.1, p=1, border_mode=0),
+                A.HorizontalFlip(p=0.8),
+                A.VerticalFlip(p=0.8),
+                A.ShiftScaleRotate(scale_limit=0.5, rotate_limit=0.5, shift_limit=0.5, p=0.8),
 
                 # A.PadIfNeeded(min_height=320, min_width=320, always_apply=True, border_mode=0),
                 # A.RandomCrop(height=320, width=320, always_apply=True),
                 # A.IAAAdditiveGaussianNoise(p=0.2),
-                A.Perspective(p=0.5),
+                A.Perspective(p=0.8),
 
                 A.OneOf(
                     [
                         A.RandomBrightnessContrast(p=1),
                         A.RandomGamma(p=1),
                     ],
-                    p=0.7,
+                    p=0.8,
                 ),
 
                 A.OneOf(
@@ -79,7 +80,7 @@ def get_dataTransforms(img_size):
                         A.Blur(blur_limit=3, p=1),
                         A.MotionBlur(blur_limit=3, p=1),
                     ],
-                    p=0.7,
+                    p=0.8,
                 ),
 
                 A.OneOf(
@@ -87,7 +88,7 @@ def get_dataTransforms(img_size):
                         A.RandomContrast(p=1),
                         A.HueSaturationValue(p=1),
                     ],
-                    p=0.7,
+                    p=0.8,
                 ),
             ],
             p=1.0
@@ -113,20 +114,21 @@ def get_dataTransforms_v2():
                 # A.Resize(
                 #     *img_size, interpolation=cv2.INTER_NEAREST
                 # ),
-                A.HorizontalFlip(p=0.5),
-                A.ShiftScaleRotate(scale_limit=0.5, rotate_limit=0.2, shift_limit=0.1, p=1, border_mode=0),
+                A.VerticalFlip(p=0.8),
+                A.HorizontalFlip(p=0.8),
+                A.ShiftScaleRotate(scale_limit=0.5, rotate_limit=0.5, shift_limit=0.5, p=0.8, border_mode=0),
 
                 # A.PadIfNeeded(min_height=320, min_width=320, always_apply=True, border_mode=0),
                 # A.RandomCrop(height=320, width=320, always_apply=True),
                 # A.IAAAdditiveGaussianNoise(p=0.2),
-                A.Perspective(p=0.5),
+                A.Perspective(p=0.8),
 
                 A.OneOf(
                     [
                         A.RandomBrightnessContrast(p=1),
                         A.RandomGamma(p=1),
                     ],
-                    p=0.7,
+                    p=0.8,
                 ),
 
                 A.OneOf(
@@ -135,7 +137,7 @@ def get_dataTransforms_v2():
                         A.Blur(blur_limit=3, p=1),
                         A.MotionBlur(blur_limit=3, p=1),
                     ],
-                    p=0.7,
+                    p=0.8,
                 ),
 
                 A.OneOf(
@@ -143,7 +145,7 @@ def get_dataTransforms_v2():
                         A.RandomContrast(p=1),
                         A.HueSaturationValue(p=1),
                     ],
-                    p=0.7,
+                    p=0.8,
                 ),
                 ToTensorV2()
             ],
@@ -194,7 +196,7 @@ def build_model(backbone, num_classes, device):
     #     classes=num_classes,
     #     activation=None,
     # )
-    model = smp.Unet(
+    model = smp.UnetPlusPlus(
         # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
         encoder_name=backbone,
         # use `imagenet` pre-trained weights for encoder initialization
@@ -357,8 +359,8 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
         self.cache_dir = cache_dir
 
         for _, row in self.data.iterrows():
-            p_img = os.path.join(self.path_img_dir, row["folder"], "images", f'{row["slice"]}.tif')
-
+            # p_img = os.path.join(self.path_img_dir, row["group"], "images", f'{row["slice"]}.tif')
+            p_img = row['img_path']
             with rasterio.open(p_img) as reader:
                 width, height = reader.width, reader.height
                 img = reader.read()
