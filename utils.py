@@ -122,7 +122,7 @@ def get_dataTransforms_v2():
                 # A.RandomCrop(height=320, width=320, always_apply=True),
                 # A.IAAAdditiveGaussianNoise(p=0.2),
                 A.Perspective(p=0.8),
-
+                A.HueSaturationValue(p=0.8),
                 A.OneOf(
                     [
                         A.RandomBrightnessContrast(p=1),
@@ -136,14 +136,6 @@ def get_dataTransforms_v2():
                         A.Sharpen(p=1),
                         A.Blur(blur_limit=3, p=1),
                         A.MotionBlur(blur_limit=3, p=1),
-                    ],
-                    p=0.8,
-                ),
-
-                A.OneOf(
-                    [
-                        A.RandomContrast(p=1),
-                        A.HueSaturationValue(p=1),
                     ],
                     p=0.8,
                 ),
@@ -196,7 +188,7 @@ def build_model(backbone, num_classes, device):
     #     classes=num_classes,
     #     activation=None,
     # )
-    model = smp.UnetPlusPlus(
+    model = smp.Unet(
         # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
         encoder_name=backbone,
         # use `imagenet` pre-trained weights for encoder initialization
@@ -330,7 +322,6 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
             tile_size=None,
             overlap_pct: float = 0.2,
             empty_tile_pct: float = 0.0,
-            sample_limit: int = 30000*10,
             cache_dir: str = None
     ):
         """
@@ -345,8 +336,6 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
             overlap_pct (float): Percentage of tile size to use as overlap between tiles. This effectively
                 controls the "stride" of the window as it's slid across the full scene.
             empty_tile_pct (float): Percentage of final dataset that should be empty tiles. Default is 0.0 (no empty tiles)
-            sample_limit (int): Upper-bound on the number of samples to return.
-            cache_dir (str): Cache dir to read/write to. If None, no cache directory is utilized.
         """
         self.path_img_dir = path_img_dir
         self.transforms = transforms
@@ -355,20 +344,22 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
         self.tile_size = np.array(tile_size) if tile_size is not None else None
         self.overlap_pct = overlap_pct
         self.empty_tile_pct = empty_tile_pct
-        self.sample_limit = sample_limit
         self.cache_dir = cache_dir
+        self.value_dict = dict()
 
         for _, row in self.data.iterrows():
             # p_img = os.path.join(self.path_img_dir, row["group"], "images", f'{row["slice"]}.tif')
             p_img = row['img_path']
+
             with rasterio.open(p_img) as reader:
                 width, height = reader.width, reader.height
                 img = reader.read()
                 px_max, px_min = img.max(), img.min()
+                self.check_value(row['group'], px_max, px_min)
 
             if not os.path.isfile(p_img):
                 continue
-            self.samples.append((p_img, row['rle'], [], [], 1, [px_min, px_max], [width, height]))
+            self.samples.append((p_img, row['group'], row['rle'], [], [], 1, [width, height]))
 
         if self.tile_size is not None:
             empty = 0
@@ -377,7 +368,7 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
             empty_tiles = []
             populated_tiles = []
 
-            for file_path, rle, _, _, _, px_stats, img_dims in tqdm(self.samples, total=len(self.samples), desc='Generating tiles'):
+            for file_path, group, rle, _, _, _, img_dims in tqdm(self.samples, total=len(self.samples), desc='Generating tiles'):
                 width, height = img_dims
 
                 mask = rle_decode(rle, img_shape=[height, width])
@@ -399,14 +390,15 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
 
                         if is_empty:
                             empty += 1
-                            empty_tiles.append((file_path, rle, [x1, y1, x2 - x1, y2 - y1], [height, width], 0, px_stats, img_dims))
+                            empty_tiles.append((file_path, group, rle, [x1, y1, x2 - x1, y2 - y1], [height, width], 0, img_dims))
 
                         else:
                             nonempty += 1
-                            populated_tiles.append((file_path, rle, [x1, y1, x2 - x1, y2 - y1], [height, width], 1, px_stats, img_dims))
+                            populated_tiles.append((file_path, group, rle, [x1, y1, x2 - x1, y2 - y1], [height, width], 1, img_dims))
 
-            num_empty_tiles_to_sample = int(self.sample_limit * self.empty_tile_pct)
-            num_pos_tiles_to_sample = int(self.sample_limit * (1 - self.empty_tile_pct))
+            len_sample = len(populated_tiles)
+            num_empty_tiles_to_sample = int(len_sample * self.empty_tile_pct)
+            num_pos_tiles_to_sample = int(len_sample * (1 - self.empty_tile_pct))
 
             empty_idxs_to_sample = np.random.choice(len(empty_tiles), min(num_empty_tiles_to_sample, len(empty_tiles)), replace=False)
             pos_idxs_to_sample = np.random.choice(len(populated_tiles), min(num_pos_tiles_to_sample, len(populated_tiles)), replace=False)
@@ -418,8 +410,16 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
 
             self.samples = new_samples
             if self.empty_tile_pct == 0.0:
-                print(f'Dropped {empty} empty tiles.')
-            print(f'Dataset contains {len(neg_samples)} empty and {len(pos_samples)} non-empty tiles.')
+                logger.info('Dropped {} empty tiles.'.format(empty))
+            logger.info('Dataset contains {} empty and {} non-empty tiles.'.format(len(neg_samples), len(pos_samples)))
+            logger.info(self.value_dict)
+
+    def check_value(self, group, px_max, px_min):
+        if group in self.value_dict:
+            self.value_dict[group][0] = max(px_max, self.value_dict[group][0])
+            self.value_dict[group][1] = min(px_max, self.value_dict[group][1])
+        else:
+            self.value_dict[group] = [px_max, px_min]
 
     def __getitem__(self, idx: int) -> tuple:
         """
@@ -427,7 +427,7 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
 
         """
         # Grab the sample from the sample list
-        img_fpath, rle, bbox, original_img_size, target, px_stats, img_dims = self.samples[idx]
+        img_fpath, group, rle, bbox, original_img_size, target, img_dims = self.samples[idx]
 
         # If the user points us to a cache directory, generate the file paths to the cached imagery
         cache_file_img = None
@@ -451,11 +451,13 @@ class SenNetHOATiledDataset(torch.utils.data.Dataset):
             if img.ndim == 3:
                 img = np.mean(img, axis=2)
 
+            max_value = self.value_dict[group][0]
+            min_value = self.value_dict[group][1]
             # If we read the window from the full scene, compress the dynamic range to UINT8
-            # TODO: Save full scene statistics and compress relative to those, rather than tile level statistics
-            img = (img - px_stats[0]) / (px_stats[1] - px_stats[0])
-            img *= 255.0
-            img = img.astype(np.uint8)
+            img = (img - min_value) / ((max_value - min_value) + 1e-7)
+            # img *= 255.0
+            img[img > 1] = 1
+            img = img.astype(np.float32)
 
         # If the cached mask exists, load it. Otherwise, decode the rle and grab the window
         if cache_file_mask and os.path.exists(cache_file_mask):

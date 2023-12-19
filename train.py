@@ -30,6 +30,7 @@ name_weight_path = '{}_{}_{}'.format(dt_string, conf.model_name, conf.backbone_n
 weight_path = opj(conf.weight_path, name_weight_path) 
 os.makedirs(weight_path, exist_ok=True)
 
+
 utils.seed_everything(conf.seed)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -53,9 +54,9 @@ def criterion(y_pred, y_true):
         return BCELoss(y_pred, y_true.unsqueeze(1)) + LovaszLoss(y_pred, y_true) + FocalLoss(y_pred, y_true) 
 
 
-def fetch_scheduler(optimizer):
+def fetch_scheduler(optimizer, len_dataset):
     if conf.scheduler == 'CosineAnnealingLR':
-        scheduler = lr_scheduler.CosineAnnealingLR(optimizer,T_max=conf.T_max, 
+        scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=conf.T_max*len_dataset, 
                                                    eta_min=conf.min_lr)
     elif conf.scheduler == 'CosineAnnealingWarmRestarts':
         scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=conf.T_0, 
@@ -93,8 +94,8 @@ def train_one_epoch(model, optimizer, scheduler, dataloader, device, epoch):
         
         with amp.autocast(enabled=True):
             y_pred = model(images)
-            loss   = criterion(y_pred, masks)
-            loss   = loss / conf.n_accumulate
+            loss = criterion(y_pred, masks)
+            loss = loss / conf.n_accumulate
             
         scaler.scale(loss).backward()
     
@@ -106,10 +107,10 @@ def train_one_epoch(model, optimizer, scheduler, dataloader, device, epoch):
             optimizer.zero_grad()
 
             if scheduler is not None:
-                if conf.scheduler != 'CosineAnnealingWarmRestarts':
-                    scheduler.step()
-                else:
+                if conf.scheduler == 'CosineAnnealingWarmRestarts':
                     scheduler.step((epoch-1) + step / len(dataloader))
+                else:
+                    scheduler.step()
                 
         running_loss += (loss.item() * batch_size)
         dataset_size += batch_size
@@ -118,10 +119,10 @@ def train_one_epoch(model, optimizer, scheduler, dataloader, device, epoch):
         
         mem = torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0
         current_lr = optimizer.param_groups[0]['lr']
-        pbar.set_postfix( epoch=f'{epoch}',
-                          train_loss=f'{epoch_loss:0.5f}',
-                          lr=f'{current_lr:0.5f}',
-                          gpu_mem=f'{mem:0.2f} GB')
+        pbar.set_postfix(
+                epoch=f'{epoch}', train_loss=f'{epoch_loss:0.5f}',
+                lr=f'{current_lr:0.5f}', gpu_mem=f'{mem:0.2f} GB'
+                )
     torch.cuda.empty_cache()
     gc.collect()
     return epoch_loss
@@ -277,18 +278,18 @@ def main():
                 transforms=data_transforms['valid']
             )
     else:
-        df = pd.read_csv(opj(conf.data_path, "train_rles.csv"))
-        df[["dataset", "slice"]] = df['id'].str.rsplit(pat='_', n=1, expand=True)
-        df['folder'] = df['dataset']
-        df.loc[df['dataset'] == 'kidney_3_dense', 'folder'] = 'kidney_3_sparse'
-        train_df = df.query("dataset in @train_groups").reset_index(drop=True)
-        valid_df = df.query("dataset in @valid_groups").reset_index(drop=True)
+        df = pd.read_csv(conf.gt_df)
+        # df[["dataset", "slice"]] = df['id'].str.rsplit(pat='_', n=1, expand=True)
+        # df['folder'] = df['dataset']
+        #df.loc[df['dataset'] == 'kidney_3_dense', 'folder'] = 'kidney_3_sparse'
+        train_df = df.query("group in @train_groups").reset_index(drop=True)
+        valid_df = df.query("group in @valid_groups").reset_index(drop=True)
         data_transforms = utils.get_dataTransforms_v2()
         logger.info('Len of data in train group: {}'.format(len(train_df)))
         logger.info('Len of data in valid group: {}'.format(len(valid_df)))
         if conf.debug:
-            train_df = train_df[:conf.train_bs*15]
-            valid_df = valid_df[:conf.valid_bs*10]
+            train_df = train_df[:conf.train_bs*25]
+            valid_df = valid_df[:conf.valid_bs*7]
         train_dataset = utils.SenNetHOATiledDataset(
                             train_df,
                             path_img_dir=conf.train_path,
@@ -302,19 +303,23 @@ def main():
                             path_img_dir=conf.train_path,
                             tile_size=conf.img_size,
                             overlap_pct=conf.overlap_pct,
-                            empty_tile_pct=0.5,
+                            empty_tile_pct=0.001,
                             transforms=data_transforms['valid']
                         )
     train_loader = DataLoader(
-            train_dataset, batch_size=conf.train_bs, num_workers=4, shuffle=False, pin_memory=True, drop_last=False
+            train_dataset, batch_size=conf.train_bs, num_workers=4, shuffle=False,
+            pin_memory=True, drop_last=True
         )
     valid_loader = DataLoader(
-            valid_dataset, batch_size=conf.valid_bs, num_workers=4, shuffle=False, pin_memory=True
+            valid_dataset, batch_size=conf.valid_bs, num_workers=4, shuffle=False,
+            pin_memory=True
         )
 
     model = utils.build_model(conf.backbone_name, conf.num_classes, device)
-    optimizer = optim.Adam(model.decoder.parameters(), lr=conf.lr, weight_decay=conf.wd)
-    scheduler = fetch_scheduler(optimizer)
+    # optimizer = optim.Adam(model.decoder.parameters(), lr=conf.lr, weight_decay=conf.wd)
+    optimizer = optim.SGD(model.decoder.parameters(), lr=conf.lr, momentum=0.9, weight_decay=conf.wd)
+    logger.info(len(train_loader))
+    scheduler = fetch_scheduler(optimizer, len(train_loader))
 
     run_training(
             model, optimizer, scheduler, device, conf.epochs, train_loader, valid_loader
