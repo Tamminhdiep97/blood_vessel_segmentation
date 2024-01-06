@@ -47,9 +47,9 @@ def criterion(y_pred, y_true):
         y_true = y_true.unsqueeze(1)
         return BCELoss(y_pred, y_true)
     elif conf.loss_func == 'MultiLoss':
-        return ((FocalLoss(y_pred, y_true)+BCELoss(y_pred, y_true.unsqueeze(1))) + DiceLoss(y_pred, y_true))
+        return ((FocalLoss(y_pred, y_true)/3+BCELoss(y_pred, y_true.unsqueeze(1))/3) + DiceLoss(y_pred, y_true)/3)
     elif conf.loss_func == 'MultiLoss_2':
-        return BCELoss(y_pred, y_true.unsqueeze(1)) + LovaszLoss(y_pred, y_true)
+        return 0.5*BCELoss(y_pred, y_true.unsqueeze(1)) + 0.5*LovaszLoss(y_pred, y_true)
     elif conf.loss_func == 'MultiLoss_3':
         return BCELoss(y_pred, y_true.unsqueeze(1)) + LovaszLoss(y_pred, y_true) + FocalLoss(y_pred, y_true) 
 
@@ -288,14 +288,14 @@ def main():
         logger.info('Len of data in train group: {}'.format(len(train_df)))
         logger.info('Len of data in valid group: {}'.format(len(valid_df)))
         if conf.debug:
-            train_df = train_df[:conf.train_bs*25]
+            train_df = train_df[:conf.train_bs*10]
             valid_df = valid_df[:conf.valid_bs*7]
         train_dataset = utils.SenNetHOATiledDataset(
                             train_df,
                             path_img_dir=conf.train_path,
                             tile_size=conf.img_size,
                             overlap_pct=conf.overlap_pct,
-                            empty_tile_pct=0,
+                            empty_tile_pct=0.001,
                             transforms=data_transforms['train']
                         )
         valid_dataset = utils.SenNetHOATiledDataset(
@@ -317,7 +317,8 @@ def main():
 
     model = utils.build_model(conf.backbone_name, conf.num_classes, device)
     # optimizer = optim.Adam(model.decoder.parameters(), lr=conf.lr, weight_decay=conf.wd)
-    optimizer = optim.SGD(model.decoder.parameters(), lr=conf.lr, momentum=0.9, weight_decay=conf.wd)
+    optimizer = optim.AdamW(model.decoder.parameters(), lr=conf.lr, weight_decay=conf.wd)
+    # optimizer = optim.SGD(model.decoder.parameters(), lr=conf.lr, momentum=0.9, weight_decay=conf.wd)
     logger.info(len(train_loader))
     scheduler = fetch_scheduler(optimizer, len(train_loader))
 
